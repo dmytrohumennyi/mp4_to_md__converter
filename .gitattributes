@@ -1,0 +1,19 @@
+# Нормалізація перекладів рядка: у репозиторії завжди LF.
+# Критично для .sh — файл з CRLF не запуститься на Linux
+# ("bad interpreter: /usr/bin/env bash^M").
+* text=auto eol=lf
+
+*.sh   text eol=lf
+*.py   text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+
+# Бінарні файли — без будь-яких перетворень.
+*.mp4  binary
+*.mp3  binary
+*.wav  binary
+*.png  binary
+
+# Підказка GitHub Linguist: converter.py вбудований в install.sh,
+# тому проєкт визначався б як Shell попри те, що логіка на Python.
+install.sh linguist-language=Python

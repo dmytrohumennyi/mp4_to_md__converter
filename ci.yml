@@ -1,0 +1,100 @@
+# =============================================================================
+#  CI: перевірка install.sh і коду, який він генерує.
+#
+#  Сенс: converter.py вбудований в install.sh як heredoc, тож звичайний
+#  лінтер Python його не побачить. Тому спершу генеруємо файли режимом
+#  --emit-only, а вже потім перевіряємо результат.
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:      # можливість запустити вручну з вкладки Actions
+
+jobs:
+  shell:
+    name: Перевірка install.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Синтаксис bash
+        run: bash -n install.sh
+
+      - name: ShellCheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y shellcheck
+          # SC1091 — не перевіряти файли, які підключаються під час виконання
+          # (/etc/os-release), їх у репозиторії немає.
+          shellcheck --severity=warning --exclude=SC1091 install.sh
+
+  python:
+    name: Перевірка згенерованого converter.py
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Генерація файлів
+        run: bash install.sh --emit-only
+
+      - name: Усі очікувані файли створені
+        run: |
+          set -e
+          for f in converter.py converter.env requirements.txt USAGE.md; do
+            test -f "$f" || { echo "Не створено: $f"; exit 1; }
+          done
+          echo "Усі файли на місці."
+
+      - name: Компіляція
+        run: python -m py_compile converter.py
+
+      - name: Статичний аналіз
+        run: |
+          pip install --quiet ruff
+          # E501 (довжина рядка) вимкнено: у файлі багато розгорнутих
+          # коментарів українською, вони довші за 88 символів.
+          ruff check --select=E,F --ignore=E501 converter.py
+
+      - name: Довідка друкується і код виходу нульовий
+        run: python converter.py
+
+  smoke:
+    name: Наскрізний прогон (без Whisper)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+
+      - name: Генерація
+        run: bash install.sh --emit-only
+
+      - name: Тестове відео з кириличною назвою і пробілом
+        run: |
+          ffmpeg -hide_banner -loglevel error -y \
+            -f lavfi -i "testsrc=duration=5:size=320x240:rate=10" \
+            -f lavfi -i "sine=frequency=440:duration=5" \
+            -shortest "Лекція 01.mp4"
+
+      - name: Етапи 1-2 (папка та видобування звуку)
+        run: |
+          # Розпізнавання не запускаємо: ваги large-v3 важать 3 ГБ.
+          # Очікуємо ненульовий код виходу на етапі Whisper — перевіряємо
+          # саме те, що до нього дійшло і артефакти створені.
+          python converter.py "Лекція 01.mp4" || true
+          test -f "Лекція 01/Лекція 01.mp4" || { echo "Відео не скопійоване"; exit 1; }
+          test -f "Лекція 01/Лекція 01.mp3" || { echo "Звук не видобутий"; exit 1; }
+          echo "Артефакти створені."
